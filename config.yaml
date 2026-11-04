@@ -1,0 +1,129 @@
+# 量化系统 V1「策略竞技场」全局配置
+# 所有阈值/权重/数量均在此文件调整，代码不硬编码
+
+project:
+  name: "策略竞技场 V1"
+  initial_cash: 1000000        # 每账户初始资金
+  backtest_start: "2025-06-12"
+  backtest_end: "2025-11-02"
+  warmup_days: 200             # 回测起点前的预热交易日数
+  random_seed: 42
+
+paths:
+  daily: "data/daily"          # 日线 parquet 目录
+  snapshot: "data/snapshot"    # 全市场快照目录
+  sentiment: "data/sentiment"  # 情绪指数目录
+  signals: "data/signals"      # 预选信号输出目录
+  results: "backtest/results"  # 回测结果目录
+
+universe:
+  # 板块代码前缀，只做沪深主板 + 创业板
+  allowed_prefixes: ["000", "001", "002", "003", "300", "301"]
+  exclude_st: true             # 剔除 ST / *ST / 退市
+  min_price: 3.0               # 股价下限
+  max_price: 200.0             # 股价上限
+  min_float_mv: 3e9            # 流通市值下限（元），30亿
+  max_float_mv: 1.5e12         # 流通市值上限（元），1500亿
+  max_daily_pct_up: 7.0        # 当日涨幅上限，超过不追
+  max_daily_pct_down: -7.0     # 当日跌幅下限，低于不接
+  candidate_pool_size: 600     # 按成交额排序取前 N 只
+  overheat_exclude_enabled: false   # 换手率过热排除开关
+  overheat_top_pct: 20          # 换手率最高分位阈值(%)
+  overheat_min_float_mv: 5e10   # 大市值豁免线（元），大市值不踢
+  overheat_effective_date: "2025-09-01"  # 过热排除生效日期
+
+  # 消融开关：每条过滤可独立关闭，用于测量各条的贡献
+  filters:
+    exclude_st: true
+    price_range: true
+    market_cap_range: true
+    pct_chg_limit: true
+    amount_top_n: true
+    overheat_exclude: true
+
+detectors:
+  pullback:                   # 缩量回踩：低吸 / 趋势中继
+    enabled: true
+    run_from: "2025-06-12"
+    min_prior_gain: 8.0        # 此前一波上涨涨幅 ≥ %
+    max_pullback_days: 8       # 回调天数上限（含当日）
+    min_pullback_days: 2       # 回调天数下限
+    vol_shrink_ratio: 0.75     # 回调期均量 < 上涨期均量 × 此值
+    ma_support: 20             # 回调最低点不破 MA N
+
+  breakout:                   # 平台突破：追强 / 趋势启动（9月停用）
+    enabled: true
+    run_until: "2025-08-31"     # 9月起停用新仓
+    lookback: 60               # 创 N 日新高
+    vol_ratio: 1.5             # 成交量 ≥ N 日均量 × 此值
+    max_dist_from_high: 6.0    # 距前高 ≤ %
+
+  oversold:                   # 超跌反弹：均值回归 / 抄底
+    enabled: true
+    lookback: 10               # 近 N 天内
+    min_drop_from_high: 15.0   # 自最高点跌幅 ≥ %
+    min_day_gain: 1.0          # 当日收阳涨幅 ≥ %
+    no_new_low: true           # 当日最低不创新低
+
+  momentum:                   # 强者恒强：动量 / 买龙头
+    enabled: true
+    lookback: 20               # 近 N 日
+    min_gain: 25.0             # 涨幅 ≥ %
+    max_drawdown_from_high: 8.0  # 距高点回撤 < %
+    ma_hold: 10                # 守住 MA N
+
+scoring:
+  weights:                    # 六项加权，总分 100
+    pattern_fit: 30.0
+    ma_trend: 20.0
+    vol_health: 15.0
+    relative_strength: 15.0
+    pullback_position: 10.0
+    macd: 10.0
+  buy_max_score: 70.0         # 综合得分须低于此值才买
+
+position:
+  max_holdings: 6             # 每账户最多持有 N 只
+  target_weight: 0.18         # 每只目标仓位
+  max_buy_per_round: 2        # 每轮最多买 N 只
+  max_buy_per_day: 3          # 每天最多买 N 只
+  build_days: 10              # 分散建仓天数
+  build_start_time: "09:40"   # 起允许开新仓
+
+risk:
+  stop_loss: -6.0             # R1 止损：浮亏 ≥ %
+  breakeven_trigger: 7.0      # R2 保盈：浮盈曾达 %
+  breakeven_exit: 3.0         # R2 保盈：回落至仅剩 %
+  breakeven_mode: "profit"    # "profit"=保盈版, "cost"=回落成本价版
+  trailing_trigger: 12.0      # R3 移动止盈：浮盈 > %
+  trailing_drawdown: 5.0      # R3 自最高点回撤 ≥ %
+  hard_profit: 18.0           # R4 硬止盈：浮盈 ≥ %
+  ma_exit: 20                  # B1 有效跌破 MA N
+  ma_confirm_time: "14:50"    # B1 收盘确认起始时间
+  time_stop_days: 20          # B2 持有满 N 天
+  time_stop_min_gain: 9.0     # B2 收益不足 % 则清仓
+  limit_down_defer: true      # B3 跌停顺延至开板
+
+broker:
+  commission_rate: 0.00025     # 佣金 万2.5
+  commission_min: 5.0          # 佣金最低 5 元
+  stamp_tax_rate: 0.001       # 印花税 千分之一（卖出）
+  transfer_fee_rate: 0.00001  # 过户费 万0.1
+  price_stale_seconds: 30     # F1 价格过期阈值（秒）
+
+cooldown:
+  days: 30                    # 卖出后 N 天内不买回
+
+sentiment:
+  weights:
+    profit_effect: 0.45
+    market_temp: 0.35
+    retail_sentiment: 0.20
+  gate_open: 52.0             # > 此值正常开仓
+  gate_limit: 40.0            # > 此值每轮最多开 1 只
+  fail_open: true             # 数据缺失时放行
+
+watchdog:
+  poll_seconds: 600            # 看门狗巡查间隔（10分钟）
+  pool_stale_rounds: 1         # 股票池落后 N 轮则停止买入
+  zero_trade_alert_days: 5     # 连续 N 日零成交告警
