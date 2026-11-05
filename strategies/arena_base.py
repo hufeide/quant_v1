@@ -19,8 +19,9 @@ class ArenaStrategyBase(bt.Strategy):
     """竞技场策略基类"""
 
     params = dict(
-        signals_dict=None,     # {date: DataFrame} 信号表
-        sentiment_scores=None, # {date: float} 情绪指数
+        # 默认空 dict 而非 None：next() 里直接 .get(date)，传 None 会 AttributeError
+        signals_dict={},
+        sentiment_scores={},
         initial_cash=1_000_000,
         account_id="A1",
         detector_name="base",
@@ -83,7 +84,15 @@ class ArenaStrategyBase(bt.Strategy):
     def next(self):
         """主循环：先卖后买"""
         # 获取当前日期
-        self.current_date = self.datas[0].datetime.date(0).isoformat()
+        new_date = self.datas[0].datetime.date(0).isoformat()
+
+        # 日期变化时重置所有账户的当日计数（第 10.1 节修复：
+        # 原来在 next() 末尾无条件重置 self.buy_count_today，但
+        # can_open() 用的是 pf.buy_count_today，从不重置 →
+        # max_buy_per_day 退化为全回测上限）
+        if new_date != self.current_date:
+            self._on_date_change(new_date)
+        self.current_date = new_date
 
         # 收盘净值记录
         prices = {name: d.close[0] for name, d in self.data_map.items()}
@@ -95,8 +104,15 @@ class ArenaStrategyBase(bt.Strategy):
         # ========== 第二步：买入（情绪闸门 + 仓位约束）============
         self._execute_buys()
 
-        # 重置当日计数（实际应在次日，简化处理）
-        self.buy_count_today = 0
+    def _on_date_change(self, new_date: str):
+        """日期变化时的回调：重置所有账户的当日计数器"""
+        # 基类单账户
+        if self.portfolio:
+            self.portfolio.reset_daily_counters()
+        # 竞技场四账户
+        if hasattr(self, 'accounts') and self.accounts:
+            for pf in self.accounts.values():
+                pf.reset_daily_counters()
 
     def _execute_sells(self, pf=None):
         """卖出执行：遍历持仓，按优先级触发卖出
@@ -114,7 +130,8 @@ class ArenaStrategyBase(bt.Strategy):
             price = data.close[0]
             # pre_close = 上一根 K 线收盘价（backtrader 中索引 -1 指向前一根）
             pre_close = data.close[-1] if len(data) > 1 else price
-            limit_down = pre_close * 0.90
+            # 跌停价按板块计算（创业板±20% vs 主板±10%）
+            limit_down = pre_close * (1.0 - self.broker_sim.limit_pct(code))
 
             # 更新持仓现价
             pos.mark_to_market(price)
@@ -141,7 +158,7 @@ class ArenaStrategyBase(bt.Strategy):
             data = self.data_map[code]
             price = data.close[0]
             pre_close = data.close[-1] if len(data) > 1 else price
-            limit_down = pre_close * 0.90
+            limit_down = pre_close * (1.0 - self.broker_sim.limit_pct(code))
 
             fill = self.broker_sim.sell(
                 code, price, pos.qty,
@@ -215,7 +232,8 @@ class ArenaStrategyBase(bt.Strategy):
                 continue
 
             # 非涨停（开关：ablation.buy_guards.no_limit_up）
-            if self.buy_guards["no_limit_up"] and self.broker_sim.is_limit_up(price, pre_close):
+            # code 传入以便按板块判断（创业板涨停 ±20%）
+            if self.buy_guards["no_limit_up"] and self.broker_sim.is_limit_up(price, pre_close, code):
                 continue
 
             # 计算目标仓位

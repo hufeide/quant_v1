@@ -65,10 +65,10 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out["high_20"] = out["high"].rolling(20, min_periods=20).max()
     out["high_10"] = out["high"].rolling(10, min_periods=10).max()
 
-    # 均量
-    out["vol_ma5"] = sma(out["volume"], 5)
-    out["vol_ma10"] = sma(out["volume"], 10)
-    out["vol_ma20"] = sma(out["volume"], 20)
+    # 均量（shift(1)：不含当日，否则量比恒被当日自身成交量拉向 1.0）
+    out["vol_ma5"] = sma(out["volume"], 5).shift(1)
+    out["vol_ma10"] = sma(out["volume"], 10).shift(1)
+    out["vol_ma20"] = sma(out["volume"], 20).shift(1)
 
     # 区间涨幅
     out["ret_20"] = close / out["close"].shift(20) - 1.0
@@ -133,7 +133,14 @@ def detect_uptrend_and_pullback(df: pd.DataFrame, i: int, cfg: dict) -> dict:
         if up_vol <= 0:
             continue
         vol_ratio = pb_vol / up_vol
-        ma_ok = not np.isnan(ma_vals[i]) and min(df["low"].values[j + 1:i + 1]) >= ma_vals[i]
+        # MA 支撑必须逐日比较：回调期每一天的 low 与当天的 MA 比较。
+        # 用 min(low) 对末日 MA 比较不等价——MA 在回调期是变动的，
+        # 那样会漏掉回调中段跌破均线的情况（实测约 9% 的场景）。
+        lows_pb = df["low"].values[j + 1:i + 1]
+        mas_pb = ma_vals[j + 1:i + 1]
+        if np.any(np.isnan(mas_pb)) or len(lows_pb) != len(mas_pb):
+            continue
+        ma_ok = bool(np.all(lows_pb >= mas_pb))
         score = seg_ret * 0.5 + (100.0 if ma_ok else 0.0) - abs(dd) * 0.1
         if best is None or score > best["score"]:
             best = {
