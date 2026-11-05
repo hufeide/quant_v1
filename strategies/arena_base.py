@@ -12,7 +12,7 @@ from src.portfolio import Portfolio
 from src.broker.simulated import SimulatedBroker
 from src.risk.rules import RiskManager
 from src.risk.sentiment_gate import SentimentGate
-from src.config import load_config, get_config
+from src.config import load_config, get_config, module_enabled
 
 
 class ArenaStrategyBase(bt.Strategy):
@@ -45,6 +45,12 @@ class ArenaStrategyBase(bt.Strategy):
                 "max_holdings": get_config("position.max_holdings", 6),
                 "target_weight": get_config("position.target_weight", 0.18),
                 "buy_max_score": get_config("scoring.buy_max_score", 70.0),
+                # 组合管理开关（config.yaml modules.portfolio / modules.scoring）
+                "portfolio_enabled": module_enabled("portfolio.enabled"),
+                "holdings_limit": module_enabled("portfolio.holdings_limit"),
+                "cooldown_enabled": module_enabled("portfolio.cooldown"),
+                "nav_tracking": module_enabled("portfolio.nav_tracking"),
+                "score_filter": module_enabled("scoring.enabled"),
             }
         )
         self.broker_sim = SimulatedBroker(
@@ -52,7 +58,13 @@ class ArenaStrategyBase(bt.Strategy):
             get_config("broker", {})
         )
         self.risk = RiskManager(get_config("risk", {}))
-        self.gate = SentimentGate(get_config("sentiment", {}))
+        # 情绪闸门：叠加消融对阈值的覆盖（ablation.sentiment.gate_open/gate_limit）
+        gate_cfg = dict(get_config("sentiment", {}))
+        for k in ("gate_open", "gate_limit"):
+            v = get_config(f"ablation.sentiment.{k}", None)
+            if v is not None:
+                gate_cfg[k] = v
+        self.gate = SentimentGate(gate_cfg)
 
         # 当前日期字符串
         self.current_date = None
@@ -178,15 +190,15 @@ class ArenaStrategyBase(bt.Strategy):
         """
         pf = pf if pf is not None else self.portfolio
         det_name = detector_name if detector_name is not None else self.p.detector_name
-        # 情绪闸门（开关：ablation.sentiment.enabled；关闭时跳过闸门直接放行）
+        # 情绪闸门（开关：modules.sentiment.enabled，兼容旧 ablation.sentiment.enabled；
+        # 关闭时跳过闸门，按仓位上限正常开仓）
         sentiment = self.p.sentiment_scores.get(self.current_date)
-        if get_config("ablation.sentiment.enabled", True):
+        if module_enabled("sentiment.enabled"):
             gate_status = self.gate.check(sentiment)
             max_buy_round = gate_status["max_buy"]
             if gate_status["mode"] == "halted":
                 return  # 暂停开仓
         else:
-            # 闸门关闭：按仓位上限正常开仓，不受情绪分限制
             max_buy_round = int(get_config("ablation.position.max_buy_per_round", 2))
 
         # 本轮已买入计数
@@ -208,11 +220,9 @@ class ArenaStrategyBase(bt.Strategy):
         for sig in my_signals.itertuples():
             if bought_this_round >= max_buy_round:
                 break
-            if pf.buy_count_today >= pf.max_buy_per_day:
-                break
 
             code = sig.code
-            # 检查冷却期、持仓上限等
+            # 检查冷却期、持仓上限等（约束开关见 modules.portfolio）
             ok, reason = pf.can_open(
                 code, self.current_date, sig.score,
                 round_budget=max_buy_round - bought_this_round

@@ -9,6 +9,42 @@ project:
   warmup_days: 200             # 回测起点前的预热交易日数
   random_seed: 42
 
+# ================================================================
+# 组合策略开关表：每个子模块独立开/关，实现灵活的组合策略回测
+# 关闭某模块后其功能不生效，其余模块正常，便于消融对比与自由组合。
+# 查找优先级：ablation.<path>（消融框架运行时注入） > modules.<path>（本表） > 默认开启
+# ================================================================
+modules:
+  detectors:                   # 形态检测器（决定买什么）
+    enabled: true              # 总开关：False = 不产生任何检测信号（整个策略为空）
+    pullback: true             # 各检测器独立开关（缩量回踩/平台突破/超跌反弹/强者恒强）
+    breakout: true
+    oversold: true
+    momentum: true
+
+  scoring:                     # 综合评分器（六项加权打分，满分 100）
+    enabled: true              # 总开关：False = 不打分，检测到的信号直接入选，不走 buy_max_score 阈值
+
+  risk:                        # 卖出风控（R1-R5 主规则 + B1-B3 兜底）
+    enabled: true              # 总开关：False = 不做任何卖出检查（持仓不动，自然到期）
+    rules:                     # 逐条规则独立开关（关闭后该规则不触发也不拦截）
+      R1_stop_loss: true       # R1 止损
+      R2_breakeven: true       # R2 保盈止损
+      R3_trailing: true        # R3 移动止盈
+      R4_hard_profit: true     # R4 硬止盈
+      B1_ma_exit: true         # B1 有效跌破均线
+      B2_time_stop: true       # B2 时间止损
+      B3_limit_down: true      # B3 跌停顺延
+
+  sentiment:                   # 情绪闸门（三档控制，只限买不限卖）
+    enabled: true              # 总开关：False = 跳过闸门，按仓位上限正常开仓
+
+  portfolio:                   # 组合管理（持仓约束 / 冷却期 / 净值追踪）
+    enabled: true              # 总开关：False = 无持仓约束、无冷却期、无买入限额（score 阈值也失效）
+    holdings_limit: true       # 持仓只数上限 + 每日买入上限约束
+    cooldown: true             # 卖出冷却期（卖出后 N 天不买回）
+    nav_tracking: true         # 净值追踪（关闭后无 daily_nav 记录，看板/汇总将显示无净值）
+
 paths:
   daily: "data/daily"          # 日线 parquet 目录
   snapshot: "data/snapshot"    # 全市场快照目录
@@ -42,8 +78,7 @@ universe:
     overheat_exclude: true
 
 detectors:
-  pullback:                   # 缩量回踩：低吸 / 趋势中继
-    enabled: true
+  pullback:                   # 缩量回踩：低吸 / 趋势中继（开关见 modules.detectors.pullback）
     run_from: "2025-06-12"
     min_prior_gain: 8.0        # 此前一波上涨涨幅 ≥ %
     max_pullback_days: 8       # 回调天数上限（含当日）
@@ -52,21 +87,18 @@ detectors:
     ma_support: 20             # 回调最低点不破 MA N
 
   breakout:                   # 平台突破：追强 / 趋势启动（9月停用）
-    enabled: true
     run_until: "2025-08-31"     # 9月起停用新仓
     lookback: 60               # 创 N 日新高
     vol_ratio: 1.5             # 成交量 ≥ N 日均量 × 此值
     max_dist_from_high: 6.0    # 距前高 ≤ %
 
-  oversold:                   # 超跌反弹：均值回归 / 抄底
-    enabled: true
+  oversold:                   # 超跌反弹：均值回归 / 抄底（开关见 modules.detectors.oversold）
     lookback: 10               # 近 N 天内
     min_drop_from_high: 15.0   # 自最高点跌幅 ≥ %
     min_day_gain: 1.0          # 当日收阳涨幅 ≥ %
     no_new_low: true           # 当日最低不创新低
 
-  momentum:                   # 强者恒强：动量 / 买龙头
-    enabled: true
+  momentum:                   # 强者恒强：动量 / 买龙头（开关见 modules.detectors.momentum）
     lookback: 20               # 近 N 日
     min_gain: 25.0             # 涨幅 ≥ %
     max_drawdown_from_high: 8.0  # 距高点回撤 < %

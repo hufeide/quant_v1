@@ -55,6 +55,13 @@ class Portfolio:
         self.pool_stale = False   # F3：股票池落后时置 True
         self.buy_blocked_reason: str = ""
 
+        # 组合管理开关（见 config.yaml modules.portfolio，由策略层注入）
+        self.portfolio_enabled = cfg.get("portfolio_enabled", True)
+        self.holdings_limit = cfg.get("holdings_limit", True)
+        self.cooldown_enabled = cfg.get("cooldown_enabled", True)
+        self.nav_tracking = cfg.get("nav_tracking", True)
+        self.score_filter = cfg.get("score_filter", True)
+
     # ---------- 持仓 ----------
 
     def market_value(self, prices: Dict[str, float]) -> float:
@@ -71,21 +78,34 @@ class Portfolio:
 
     def can_open(self, code: str, date: str, score: float,
                  round_budget: Optional[int] = None) -> tuple:
-        """检查能否开新仓，返回 (ok, reason)"""
+        """检查能否开新仓，返回 (ok, reason)
+
+        约束开关（config.yaml modules.portfolio）：
+          - portfolio_enabled：总开关，关闭时不做任何约束
+          - holdings_limit：持仓只数上限 + 每日买入上限
+          - cooldown_enabled：卖出冷却期
+          - score_filter：buy_max_score 得分阈值
+        股票池落后是数据质量问题，始终检查，不随开关关闭。
+        """
         if self.pool_stale:
             return False, "股票池数据落后，停止买入(F3)"
-        if len(self.holdings) >= self.max_holdings:
-            return False, f"持仓已达上限 {self.max_holdings} 只"
         if code in self.holdings:
             return False, "已持有该股"
-        if self.cooldown.in_cooldown(code, date):
-            return False, "冷却期内(卖出后30天不买回)"
-        if score >= self.buy_max_score:
-            return False, f"综合得分 {score} 未低于 {self.buy_max_score}"
-        if self.buy_count_today >= self.max_buy_per_day:
-            return False, f"当日买入已达上限 {self.max_buy_per_day} 只"
         if round_budget is not None and round_budget <= 0:
             return False, "本轮额度已用尽"
+
+        if not self.portfolio_enabled:
+            return True, "ok"   # 组合管理关闭：无持仓约束
+
+        if self.holdings_limit:
+            if len(self.holdings) >= self.max_holdings:
+                return False, f"持仓已达上限 {self.max_holdings} 只"
+            if self.buy_count_today >= self.max_buy_per_day:
+                return False, f"当日买入已达上限 {self.max_buy_per_day} 只"
+        if self.cooldown_enabled and self.cooldown.in_cooldown(code, date):
+            return False, "冷却期内(卖出后30天不买回)"
+        if self.score_filter and score >= self.buy_max_score:
+            return False, f"综合得分 {score} 未低于 {self.buy_max_score}"
         return True, "ok"
 
     # ---------- 成交 ----------
@@ -116,7 +136,8 @@ class Portfolio:
         self.broker_cash += (fill.price * fill.qty - fill.total_cost)
         gain = (fill.price / pos.init_price - 1.0) if pos else 0.0
         held = (date[:10] >= pos.buy_date[:10]) if pos else 0
-        self.cooldown.mark_sold(fill.code, date)
+        if self.cooldown_enabled:
+            self.cooldown.mark_sold(fill.code, date)
         self.trades.append({
             "account": self.account_id, "date": date, "code": fill.code,
             "side": "sell", "price": fill.price, "qty": fill.qty,
@@ -137,12 +158,14 @@ class Portfolio:
     # ---------- 净值 ----------
 
     def mark_nav(self, date: str, prices: Dict[str, float]):
-        """记录当日净值"""
-        # 更新持仓现价
+        """记录当日净值（开关：modules.portfolio.nav_tracking）"""
+        # 更新持仓现价（风控判断需要，不受净值开关影响）
         for code, p in self.holdings.items():
             if code in prices:
                 p.mark_to_market(prices[code])
                 p.hold_days = self._hold_days(p.buy_date, date)
+        if not self.nav_tracking:
+            return
         self.daily_nav.append({
             "date": date,
             "account": self.account_id,

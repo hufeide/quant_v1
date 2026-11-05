@@ -90,3 +90,20 @@ def get_config(key_path: str, default: Any = None) -> Any:
         else:
             return default
     return val
+
+
+def module_enabled(path: str, default: bool = True) -> bool:
+    """读取 modules.<path> 子模块开关（组合策略开关表，见 config.yaml 的 modules 段）。
+
+    查找顺序（先到先得）：
+      1. ablation.<path>    —— 消融框架通过 set_override 注入的显式覆盖，优先级最高
+      2. modules.<path>     —— config.yaml 中声明的持久开关
+      3. default            —— 两者都没有时的安全默认（True = 启用）
+
+    例: module_enabled("risk.enabled") → ablation.risk.enabled 或 modules.risk.enabled。
+    """
+    for prefix in ("ablation", "modules"):
+        v = get_config(f"{prefix}.{path}", None)
+        if v is not None:
+            return bool(v)
+    return default

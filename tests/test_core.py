@@ -186,5 +186,90 @@ check("卖出回现金", abs(pf2.broker_cash - (1_000_000 - 100000 - 26.0 + 1100
 check("卖出后冷却", pf2.cooldown.in_cooldown("600000", "2025-09-20"))
 
 
+# ==================== 组合策略开关表（config.yaml modules 段） ====================
+print("== 组合策略开关表 ==")
+from src.config import module_enabled, set_override, clear_override
+
+# 默认全部启用（config.yaml modules 段声明）
+check("modules.detectors.enabled 默认开启", module_enabled("detectors.enabled") is True)
+check("modules.risk.enabled 默认开启", module_enabled("risk.enabled") is True)
+check("modules.sentiment.enabled 默认开启", module_enabled("sentiment.enabled") is True)
+check("modules.portfolio.enabled 默认开启", module_enabled("portfolio.enabled") is True)
+check("modules.scoring.enabled 默认开启", module_enabled("scoring.enabled") is True)
+check("逐条规则默认开启", module_enabled("risk.rules.B1_ma_exit") is True)
+
+# 消融覆盖（ablation.*）优先于 config.yaml 的 modules.*
+set_override({"ablation": {"sentiment": {"enabled": False}}})
+check("ablation 覆盖优先于 modules 表", module_enabled("sentiment.enabled") is False)
+clear_override()
+
+# ---------- 风控总开关 ----------
+set_override({"modules": {"risk": {"enabled": False}}})
+rm_off = RiskManager({"stop_loss": -6.0})
+p_off = Position("600000", 10.0, 9.30, 1000, "2025-09-01")   # 亏 7%，正常应触发 R1
+check("风控总开关关闭：R1 不触发", rm_off.check_all(p_off) is None)
+clear_override()
+rm_on = RiskManager({"stop_loss": -6.0})
+r_on = rm_on.check_all(p_off)
+check("风控总开关恢复：R1 触发", r_on is not None and r_on["rule"] == "R1", str(r_on))
+
+# ---------- 逐条规则开关 ----------
+set_override({"modules": {"risk": {"rules": {"R1_stop_loss": False}}}})
+rm_r1off = RiskManager({"stop_loss": -6.0})
+check("关闭 R1 后该规则不触发", rm_r1off.check_all(p_off) is None)
+clear_override()
+
+# ---------- 组合管理开关 ----------
+pf_off = Portfolio("A1", 1_000_000, {
+    "cooldown_days": 30, "buy_max_score": 70.0, "max_buy_per_day": 3, "max_holdings": 6,
+    "portfolio_enabled": False, "holdings_limit": False, "cooldown_enabled": False,
+    "nav_tracking": False, "score_filter": False,
+})
+check("组合管理关闭：高分行可买", pf_off.can_open("600100", "2025-09-01", 95.0)[0])
+for i in range(6):
+    pf_off.holdings[f"60000{i}"] = Position(f"60000{i}", 10.0, 10.0, 100, "2025-09-01")
+check("组合管理关闭：持仓超限仍可买", pf_off.can_open("600009", "2025-09-01", 95.0)[0])
+
+# 单项开关：持仓上限
+pf_hl = Portfolio("A1", 1_000_000, {
+    "cooldown_days": 30, "buy_max_score": 70.0, "max_buy_per_day": 3, "max_holdings": 6,
+    "holdings_limit": False,
+})
+for i in range(6):
+    pf_hl.holdings[f"60000{i}"] = Position(f"60000{i}", 10.0, 10.0, 100, "2025-09-01")
+check("关闭持仓上限：可继续买", pf_hl.can_open("600009", "2025-09-01", 60.0)[0])
+
+# 单项开关：冷却期
+pf_cd = Portfolio("A1", 1_000_000, {
+    "cooldown_days": 30, "buy_max_score": 70.0, "max_buy_per_day": 3, "max_holdings": 6,
+    "cooldown_enabled": False,
+})
+pf_cd.cooldown.mark_sold("600000", "2025-08-01")
+check("关闭冷却期：期内可买回", pf_cd.can_open("600000", "2025-08-10", 60.0)[0])
+
+# 单项开关：净值追踪
+pf_nav = Portfolio("A1", 1_000_000, {
+    "cooldown_days": 30, "buy_max_score": 70.0, "max_buy_per_day": 3, "max_holdings": 6,
+    "nav_tracking": False,
+})
+pf_nav.mark_nav("2025-09-01", {})
+check("关闭净值追踪：无 daily_nav", pf_nav.daily_nav == [])
+
+# ---------- 检测器开关 ----------
+from src.signal_engine import build_detectors
+from src.config import load_config
+cfg = load_config()
+dets_all = build_detectors(cfg)
+check("默认构建四个检测器", len(dets_all) == 4, str(list(dets_all)))
+set_override({"modules": {"detectors": {"enabled": False}}})
+check("检测器总开关关闭：无检测器", build_detectors(cfg) == {})
+clear_override()
+set_override({"modules": {"detectors": {"pullback": False}}})
+dets_off = build_detectors(cfg)
+check("分开关关闭 pullback：其余保留",
+      "pullback" not in dets_off and len(dets_off) == 3, str(list(dets_off)))
+clear_override()
+
+
 print(f"\n{'='*40}\n通过 {PASS} 项，失败 {FAIL} 项\n{'='*40}")
 sys.exit(1 if FAIL else 0)

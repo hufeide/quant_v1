@@ -8,7 +8,7 @@ backtrader 的一个 Cerebro 只实例化一个 Strategy，
 唯一变量是「买什么」（detector 决定）。这正是 V1 控制变量法的实现。
 """
 from strategies.arena_base import ArenaStrategyBase
-from src.config import get_config
+from src.config import get_config, module_enabled
 
 
 class ArenaDispatcher(ArenaStrategyBase):
@@ -54,6 +54,12 @@ class ArenaDispatcher(ArenaStrategyBase):
                 "max_holdings": get_config("position.max_holdings", 6),
                 "target_weight": get_config("position.target_weight", 0.18),
                 "buy_max_score": get_config("scoring.buy_max_score", 70.0),
+                # 组合管理开关（config.yaml modules.portfolio / modules.scoring）
+                "portfolio_enabled": module_enabled("portfolio.enabled"),
+                "holdings_limit": module_enabled("portfolio.holdings_limit"),
+                "cooldown_enabled": module_enabled("portfolio.cooldown"),
+                "nav_tracking": module_enabled("portfolio.nav_tracking"),
+                "score_filter": module_enabled("scoring.enabled"),
             }
         )
 

@@ -145,19 +145,33 @@ class RiskManager:
     }
 
     def _rule_on(self, rule_id: str, default: bool = True) -> bool:
-        """读取消融开关；未配置时按默认开启"""
-        from src.config import get_config
+        """读取规则开关；未配置时按默认开启。
+
+        兼容两个位置（先到先得）：
+          ablation.risk.<KEY>       —— 消融框架运行时注入（旧）
+          modules.risk.rules.<KEY>  —— 组合策略开关表（新，见 config.yaml modules.risk.rules）
+        """
+        from src.config import get_config, module_enabled
         toggle_key = self.RULE_TOGGLE_KEYS.get(rule_id, rule_id)
-        return bool(get_config(f"ablation.risk.{toggle_key}", default))
+        legacy = get_config(f"ablation.risk.{toggle_key}", None)
+        if legacy is not None:
+            return bool(legacy)
+        return module_enabled(f"risk.rules.{toggle_key}", default)
 
     def check_all(self, pos: Position, ma_value: float = None,
                   after_confirm_time: bool = False, at_close: bool = False,
                   limit_down: float = None, sealed: bool = False) -> Optional[Dict]:
         """按优先级返回唯一一条触发规则
 
-        每条规则可由 ablation.risk.<RID> 单独关闭，用于测量该规则的贡献。
+        总开关 modules.risk.enabled（兼容 ablation.risk.enabled）：
+        关闭后不做任何卖出检查，持仓不动。
+        每条规则可由 modules.risk.rules.<RID> 单独关闭，用于测量该规则的贡献。
         关闭后该规则既不触发也不拦截——优先级排序只在启用的规则间进行。
         """
+        from src.config import module_enabled
+        if not module_enabled("risk.enabled"):
+            return None
+
         checks = []
         if self._rule_on("R4"):
             checks.append(self.r4_hard_profit(pos))
