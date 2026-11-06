@@ -2,13 +2,14 @@
 
 流程：
   1. 加载全市场日线数据
-  2. 用快照做粗筛（universe filter）
+  2. 逐日时点候选池粗筛（universe filter）
   3. 对每只候选股扫描全部交易日，运行四个检测器
   4. 计算六项综合打分
   5. 按交易日汇总输出信号 DataFrame
 """
+from bisect import bisect_right
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 import pandas as pd
 from src.config import load_config, get_config, module_enabled
 from src.data_loader import load_daily_with_indicators, list_codes
@@ -45,13 +46,17 @@ def build_detectors(cfg: Dict) -> Dict:
 
 def scan_stock(code: str, detectors: Dict, scorer: WeightedScorer,
                run_dates: List[str], daily_dir: str,
-               rs_map: Dict[tuple, float] = None) -> pd.DataFrame:
+               rs_map: Dict[tuple, float] = None,
+               universe_by_date: Dict[str, Optional[set]] = None) -> pd.DataFrame:
     """对单只股票扫描指定日期范围，输出信号行
 
     rs_map: 预先算好的横截面相对强度百分位 {(date, code): percentile}。
     未传或缺失时回退 0.5（中性），不阻断扫描。
+    universe_by_date: 逐日 point-in-time 候选池 {date: set(codes)}，
+        date 当日不在池中的股票不产生该日信号；值为 None 的日期不过滤。
     """
     rs_map = rs_map or {}
+    universe_by_date = universe_by_date or {}
     try:
         df = load_daily_with_indicators(code, daily_dir)
     except FileNotFoundError:
@@ -63,6 +68,18 @@ def scan_stock(code: str, detectors: Dict, scorer: WeightedScorer,
     rows = []
     date_set = set(run_dates)
     n = len(df)
+
+    # 预计算：仅保留本股在当前 universe 中可行的交易日子集
+    # （universe_by_date 已保证只含当日及之前的数据，无前视；
+    #   值为 None 的日期无快照可用，按“不过滤”处理）
+    eligible_dates = (
+        {d for d in date_set
+         if d in universe_by_date
+         and (universe_by_date[d] is None or code in universe_by_date[d])}
+        if universe_by_date else set(date_set)
+    )
+    if universe_by_date and not eligible_dates:
+        return pd.DataFrame()
 
     # 预算各检测器
     det_results = {}
@@ -90,6 +107,8 @@ def scan_stock(code: str, detectors: Dict, scorer: WeightedScorer,
         date_str = str(df["date"].iloc[i])[:10]
         if date_str not in date_set:
             continue
+        if universe_by_date and date_str not in eligible_dates:
+            continue  # 当日未入池：不进过滤（前视偏差防护）
 
         for dname, (det, enabled) in det_results.items():
             if date_str not in enabled:
@@ -132,57 +151,49 @@ def scan_stock(code: str, detectors: Dict, scorer: WeightedScorer,
     return pd.DataFrame(rows)
 
 
-def _apply_universe_filter(codes: List[str], run_dates: List[str]) -> List[str]:
-    """用快照对股票列表应用 universe 过滤
+def _build_universe_by_date(run_dates: List[str]) -> Dict[str, Optional[set]]:
+    """为每个交易日构建 point-in-time 候选池
 
-    快照缺失时返回原列表（数据不足不阻断信号生成）。
+    对每个交易日，只取该日 **之前（含当日）最近** 的快照应用 universe 过滤。
+    这样某日之后才进池的股票不会在更早的交易日产生信号，避免前视偏差。
+    快照文件缺失/读取失败记为 None（该日不过滤，数据不足不阻断信号生成）。
+
+    Returns:
+        {date: set(candidate codes) | None}
     """
-    # 候选池过滤：按快照应用 universe 过滤，剔除不合格股票。
-    # 回测窗口首日可能早于快照覆盖范围（快照从某个日期才开始生成），
-    # 所以要取窗口内最近可用的快照，而不是用窗口首日。
     snap_dir = get_config("paths.snapshot", "data/snapshot")
-    snap = _load_snapshot_near(snap_dir, run_dates)
-    if snap is None:
-        return codes
-
-    if snap.empty or "code" not in snap.columns:
-        return codes
-
-    from src.universe.filter import filter_universe
-    pool, _ = filter_universe(snap)
-    pool_codes = set(pool["code"].astype(str).tolist())
-    kept = [c for c in codes if c in pool_codes]
-    if len(kept) < len(codes):
-        print(f"[信号引擎] universe 过滤：{len(codes)} → {len(kept)} 只")
-    return kept
-
-
-def _load_snapshot_near(snap_dir: str, run_dates: List[str]) -> Optional[pd.DataFrame]:
-    """在 run_dates 窗口内取最近可用的快照，找不到返回 None"""
     sdir = Path(snap_dir)
     if not sdir.exists():
-        return None
+        return {d: None for d in run_dates}
 
-    available = {p.stem for p in sdir.glob("*.parquet")}
-    # 窗口内可用的日期
-    in_window = sorted(d for d in run_dates if d in available)
-    if in_window:
-        date = in_window[-1]   # 取最近的（修复：原来是 [0] 取最早）
-    else:
-        # 窗口外最近的快照也用（数据缺失时不阻断）
-        all_dates = sorted(available)
-        date = all_dates[-1] if all_dates else None
-        if date:
-            print(f"[信号引擎] 窗口内无快照，改用最近快照 {date}")
+    available = sorted(p.stem for p in sdir.glob("*.parquet"))
+    if not available:
+        return {d: None for d in run_dates}
 
-    if date is None:
-        return None
+    from src.universe.filter import filter_universe
 
-    path = sdir / f"{date}.parquet"
-    try:
-        return pd.read_parquet(path)
-    except Exception:
-        return None
+    pool_cache: Dict[str, Optional[set]] = {}
+    out: Dict[str, Optional[set]] = {}
+    for d in run_dates:
+        # 在该日及之前最近的快照（bisect_right - 1），而不是窗口内最晚的
+        idx = bisect_right(available, d) - 1
+        if idx < 0:
+            # 早于最早可用快照：该日无历史 universe 信息，不过滤
+            out[d] = None
+            continue
+        snap_date = available[idx]
+        if snap_date not in pool_cache:
+            try:
+                snap = pd.read_parquet(sdir / f"{snap_date}.parquet")
+                if snap.empty or "code" not in snap.columns:
+                    pool_cache[snap_date] = None
+                else:
+                    pool, _ = filter_universe(snap)
+                    pool_cache[snap_date] = set(pool["code"].astype(str))
+            except Exception:
+                pool_cache[snap_date] = None
+        out[d] = pool_cache[snap_date]
+    return out
 
 
 def compute_relative_strength(
@@ -257,9 +268,18 @@ def generate_signals(run_dates: List[str], cfg_path: str = "config.yaml",
             print("[信号引擎] 无可用日线数据，请先运行 generate_data.py")
             return pd.DataFrame()
 
-    # 候选池过滤：按快照应用 universe 过滤，剔除不合格股票
-    # 快照缺失时跳过过滤（数据不足时不阻断信号生成）
-    codes = _apply_universe_filter(codes, run_dates)
+    # 候选池过滤：按交易日构建 point-in-time universe
+    # （每日只用当日及之前最近快照，无前视；详见 _build_universe_by_date）
+    universe_by_date = _build_universe_by_date(run_dates)
+
+    # 粗筛：只保留任一日期入池过的股票（universe 使用了并集上界，不会再遗漏候选）
+    n_with_snap = sum(1 for u in universe_by_date.values() if u is not None)
+    if n_with_snap:
+        union_pool = set().union(*[u for u in universe_by_date.values() if u])
+        if union_pool:
+            codes = [c for c in codes if c in union_pool]
+        print(f"[信号引擎] universe 按日过滤：{len(universe_by_date)} 天，"
+            f"{n_with_snap} 天有快照")
 
     detectors = build_detectors(cfg)
     scorer = WeightedScorer(cfg.get("scoring", {}).get("weights", {}))
@@ -273,7 +293,8 @@ def generate_signals(run_dates: List[str], cfg_path: str = "config.yaml",
 
     all_rows = []
     for code in codes:
-        df = scan_stock(code, detectors, scorer, run_dates, daily_dir, rs_map)
+        df = scan_stock(code, detectors, scorer, run_dates, daily_dir,
+                         rs_map=rs_map, universe_by_date=universe_by_date)
         if not df.empty:
             all_rows.append(df)
 

@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>策略竞技场 · 回测控制台</title>
+<style>
+:root{
+  --bg:#0f1420; --panel:#171e30; --panel2:#1d2740; --line:#2a3650;
+  --tx:#d7e0f0; --mut:#8fa0bd; --acc:#4f8cff; --acc2:#28c799; --warn:#ffb033;
+  --bad:#ff5d7a; --ok:#28c799;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);
+  font:14px/1.6 "PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+header{display:flex;align-items:center;gap:14px;padding:10px 18px;
+  background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:9}
+header h1{font-size:16px;margin:0;font-weight:600}
+header .sub{color:var(--mut);font-size:12px}
+header .badge{margin-left:auto;display:flex;gap:8px;font-size:12px;color:var(--mut)}
+header .badge b{color:var(--acc2);font-weight:600}
+main{display:grid;grid-template-columns:minmax(460px,5fr) 7fr;gap:14px;padding:14px 18px;max-width:1700px;margin:0 auto}
+@media (max-width:1100px){main{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px;min-width:0}
+h2{font-size:14px;margin:4px 0 10px;display:flex;align-items:center;gap:10px}
+h2 .hint{font-size:12px;color:var(--mut);font-weight:400}
+h3{font-size:13px;margin:14px 0 8px;color:var(--mut)}
+h4{font-size:12px;margin:10px 0 6px;color:var(--mut);letter-spacing:.05em}
+/* 按钮 */
+button{background:var(--panel2);color:var(--tx);border:1px solid var(--line);border-radius:8px;
+  padding:7px 14px;font-size:13px;cursor:pointer;transition:.12s}
+button:hover{border-color:var(--acc);filter:brightness(1.15)}
+button:disabled{opacity:.4;cursor:not-allowed}
+button.primary{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+button.primary:hover{filter:brightness(1.12)}
+button.ghost{background:transparent}
+.actions{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap}
+.actions input[type=text]{flex:1;min-width:140px;background:#0d1322;border:1px solid var(--line);
+  color:var(--tx);border-radius:8px;padding:7px 10px;font-size:13px}
+/* 配置表单 */
+section.group{border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:#131a2b;transition:filter .15s}
+section.group.off{opacity:.42;filter:saturate(.3)}
+.group > summary,section.group > .ghead{cursor:pointer;list-style-style:none;display:flex;align-items:center;gap:8px;
+  padding:8px 12px;font-weight:600;font-size:13px;user-select:none}
+section.group > .ghead .arrow{transition:.15s;color:var(--mut)}
+section.group.collapsed > .ghead .arrow{transform:rotate(-90deg)}
+section.group .gbody{padding:8px 12px 12px;border-top:1px solid var(--line)}
+section.group.collapsed .gbody{display:none}
+.row{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px 14px;margin:8px 0}
+.field{display:flex;align-items:center;gap:8px;font-size:13px}
+.field label{flex:0 0 auto;min-width:120px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.field input,.field select{flex:1;min-width:0;background:#0d1322;border:1px solid var(--line);color:var(--tx);
+  border-radius:6px;padding:5px 8px;font-size:13px;width:100%}
+.field input[type=number]{font-family:ui-monospace,monospace}
+.field input:focus{outline:none;border-color:var(--acc)}
+.check{display:flex;align-items:center;gap:6px;padding:5px 2px;font-size:13px;cursor:pointer;user-select:none}
+.check input{width:15px;height:15px;accent-color:var(--acc);cursor:pointer}
+/* module toggle */
+.modbox{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0}
+.toggle{display:inline-flex;align-items:center;gap:7px;background:var(--panel2);border:1px solid var(--line);
+  border-radius:20px;padding:5px 12px 5px 8px;font-size:13px;cursor:pointer;user-select:none;transition:.15s}
+.toggle.on{border-color:var(--acc2);background:#14342a}
+.toggle.off{border-color:var(--bad);background:#3a1a26}
+.toggle .dot{width:9px;height:9px;border-radius:50%;background:var(--mut)}
+.toggle.on .dot{background:var(--acc2)}
+.toggle.off .dot{background:var(--bad)}
+.toggle.off{opacity:.75}
+/* 结果 */
+.state{font-size:12px;color:var(--mut);font-weight:400}
+.state.run{color:var(--warn)} .state.done{color:var(--ok)} .state.err{color:var(--bad)}
+#summary .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:10px 0}
+.kpi{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.kpi .k{font-size:12px;color:var(--mut)}
+.kpi .v{font-size:18px;font-weight:700;font-family:ui-monospace,monospace;margin-top:2px}
+.kpi .v.up{color:var(--ok)} .kpi .v.dn{color:var(--bad)}
+.navtable{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
+.navtable th,.navtable td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:left}
+.navtable th{color:var(--mut);font-weight:500;font-size:12px}
+.c.up{color:var(--ok)} .c.dn{color:var(--bad)}
+.runlist label.rowchk{display:flex;align-items:center;gap:10px;padding:7px 10px;border:1px solid var(--line);
+  border-radius:8px;background:#131a2b;margin:6px 0;cursor:pointer;font-size:13px}
+.runlist input{accent-color:var(--acc);width:15px;height:15px}
+.legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:12px}
+.legend .lg{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;opacity:1;transition:.12s}
+.legend .lg.hide{opacity:.3;text-decoration:line-through}
+.legend .sw{width:14px;height:3px;border-radius:2px;display:inline-block}
+svg.chart{width:100%;height:300px;display:block;background:#0d1322;border:1px solid var(--line);border-radius:10px}
+.chart .axis{stroke:var(--line);stroke-width:1}
+.chart .grid{stroke:#1f2a44;stroke-width:1}
+.chart .lab{fill:var(--mut);font-size:10px}
+.chart .zero{stroke:var(--mut);stroke-dasharray:4 4;opacity:.5}
+.msg{font-size:12px;color:var(--mut);margin-top:8px;word-break:break-all}
+</style>
+</head>
+<body>
+<header>
+  <h1>策略竞技场 · 回测控制台</h1>
+  <span class="sub" id="data-info">加载中…</span>
+  <span class="badge"><b id="hist-n">0</b> 次回测 · <b id="upt">—</b></span>
+</header>
+<main>
+  <section class="card">
+    <h2>参数配置 <span class="hint">modules 勾选即启用；选中模块的参数可改，未勾选自动禁用</span></h2>
+    <div class="actions">
+      <input id="name" type="text" placeholder="本次回测标签，如：关闭R3">
+      <button class="primary" id="btn-run">▶ 运行回测</button>
+      <button id="btn-save">💾 保存到 config.yaml</button>
+      <button id="btn-reset" class="ghost">↺ 重置表单</button>
+    </div>
+    <div id="run-msg" class="msg"></div>
+    <div id="modules-box"></div>
+    <div id="config-root"></div>
+  </section>
+
+  <section class="card">
+    <h2>回测结果 <span class="state" id="run-state"></span></h2>
+    <div id="summary"><p style="color:var(--mut);margin:8px">尚未运行。左侧勾选 modules 并调整参数后点击「运行回测」。</p></div>
+
+    <h2>净值曲线</h2>
+    <svg class="chart" id="chart"></svg>
+
+    <h2 style="margin-top:16px">回测记录与叠加对比</h2>
+    <div class="runlist" id="runlist"><p style="color:var(--mut)">加载中…</p></div>
+    <div class="actions">
+      <button class="primary" id="btn-overlay">叠加选中记录</button>
+      <button id="btn-clear">清除叠加</button>
+    </div>
+    <div id="overlay-msg" class="msg"></div>
+    <svg class="chart" id="overlay" style="display:none"></svg>
+    <div id="overlay-legend"></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $=s=>document.querySelector(s);
+const SECTION_META={
+  project:"项目", universe:"股票池", detectors:"形态检测器参数",
+  scoring:"评分器参数", position:"仓位约束", risk:"风控参数",
+  broker:"手续费率", cooldown:"冷却期", sentiment:"情绪闸门",
+  watchdog:"看门狗", paths:"路径(建议只读)", modules:"模块开关",
+};
+let initial=null, changed=new Set();
+
+function getPath(o,path){for(const k of path.split(".")){if(o==null||typeof o!=="object")return undefined;o=o[k];}return o;}
+function setPath(o,path,val){const ks=path.split(".");let n=o;for(let i=0;i<ks.length-1;i++){if(n[ks[i]]===undefined||typeof n[ks[i]]!=="object")n[ks[i]]={};n=n[ks[i]];}n[ks[ks.length-1]]=val;}
+function fmtNum(v){return v===null||v===undefined||v===""?"":String(v);}
+
+/* ---------------- 配置渲染 ---------------- */
+/* 默认折叠的 section：项目/路径/股票池/看门狗等低频配置（点标题即可展开） */
+const COLLAPSED_DEFAULT=new Set(["project","paths","universe","watchdog"]);
+
+function renderAll(){
+  const root=$("#config-root");
+  root.innerHTML="";
+  const mod=getPath(initial,"modules")||{};
+  for(const key of Object.keys(initial)){
+    if(key==="modules") continue;
+    root.appendChild(buildGroup(key, initial[key], !COLLAPSED_DEFAULT.has(key)));
+  }
+  buildModules(mod);
+  refreshDisables();
+}
+
+function buildGroup(key, val, initiallyOpen){
+  const sec=document.createElement("section");
+  sec.className="group"+(initiallyOpen?"":" collapsed");
+  const h=document.createElement("div");
+  h.className="ghead";
+  h.innerHTML=`<span class="arrow">▾</span> ${SECTION_META[key]||key}
+    <span class="hint" style="margin-left:auto;font-weight:400">${summarize(val)}</span>`;
+  sec.appendChild(h);
+  const dev=sectionDisabled(key);
+  const body=document.createElement("div");
+  body.className="gbody";
+  if(dev) body.setAttribute("data-disabled-for",key);
+  // pathBase 必须是顶层 section 名：内层拼接依赖它，传 "" 会丢失前缀
+  // （曾导致 universe.* 编辑写回成顶层死键 min_price/filters 等）
+  buildFields(key, key, val, body, key);
+  sec.appendChild(body);
+  h.addEventListener("click",()=>sec.classList.toggle("collapsed"));
+  return sec;
+}
+
+function summarize(v){
+  if(typeof v==="boolean")return v?"启用":"禁用";
+  if(Array.isArray(v))return `${v.length}项`;
+  if(typeof v==="object"&&v)return `${Object.keys(v).length}项`;
+  return String(v).slice(0,40);
+}
+
+/* 哪些顶层 section 跟随哪些模块开关 */
+const SECTION_PARENT={
+  detectors:["modules.detectors.enabled"],
+  scoring:["modules.scoring.enabled"],
+  risk:["modules.risk.enabled"],
+  sentiment:["modules.sentiment.enabled"],
+  position:["modules.portfolio.enabled"],
+  broker:["modules.portfolio.enabled"],
+  cooldown:["modules.portfolio.enabled"],
+  watchdog:[],
+  universe:[],
+  project:[],
+  paths:[],
+};
+function sectionDisabled(key){
+  for(const dep of (SECTION_PARENT[key]||[])){
+    if(getPath(initial,dep)===false) return true;
+  }
+  return false;
+}
+
+function buildModules(mod){
+  const box=$("#modules-box");
+  box.innerHTML="";
+  const title=document.createElement("h3");
+  title.textContent="模块开关（modules.*）";
+  box.appendChild(title);
+  for(const name of Object.keys(mod)){
+    const node=mod[name];
+    if(!node||typeof node!=="object") continue;
+    const wrap=document.createElement("div");
+    const label=document.createElement("div");
+    label.className="check";
+    label.style.margin="8px 0 2px";
+    label.innerHTML=`<b style="color:var(--tx)">${name}</b><span style="color:var(--mut);font-size:12px">
+      ${MODULE_LABEL[name]||""}</span>`;
+    wrap.appendChild(label);
+    const row=document.createElement("div");
+    row.className="modbox";
+    // 递归渲染所有子开关（不含 enabled 总开关与 nav_tracking，
+    // 净值追踪默认打开，界面不暴露该参数）
+    let childCount=0;
+    const walk=(node, prefix, label)=>{
+      for(const k of Object.keys(node)){
+        if(k==="enabled" || k==="nav_tracking") continue;
+        const p=prefix+k;
+        if(typeof node[k]=="boolean"){
+          buildToggle(row, p, getPath(initial,p), k);
+          childCount++;
+        } else if(node[k]&&typeof node[k]==="object"){
+          walk(node[k], p+".", k);
+        }
+      }
+    };
+    walk(node, `modules.${name}.`, "");
+    // 无子开关的模块（如 scoring/sentiment）：渲染自身 enabled 作为独立开关
+    if(!childCount){
+      buildToggle(row, `modules.${name}.enabled`, getPath(initial,`modules.${name}.enabled`), "启用");
+    }
+    if(!row.childElementCount) continue;
+    wrap.appendChild(row);
+    box.appendChild(wrap);
+  }
+}
+const MODULE_LABEL={
+  detectors:"形态检测（决定买什么）", scoring:"综合评分阈值",
+  risk:"卖出风控", sentiment:"情绪闸门（限买不限卖）",
+  portfolio:"持仓约束 / 冷却期 / 净值", universe:"股票池过滤开关",
+};
+
+function buildToggle(parent, path, val, sub){
+  const t=document.createElement("label");
+  t.className="toggle "+(val?"on":"off");
+  t.innerHTML=`<span class="dot"></span> ${sub?sub.replace(/_/g," "):path.split(".")[2]}`;
+  const cb=document.createElement("input");
+  cb.type="checkbox"; cb.checked=!!val;
+  cb.dataset.path=path;
+  cb.addEventListener("change",e=>{
+    setPath(initial,path,e.target.checked);
+    changed.add(path);
+    refreshCheck(cb); refreshDisables();
+    refreshModulesNote();
+  });
+  t.appendChild(cb);
+  parent.appendChild(t);
+}
+function refreshCheck(cb){
+  const host=cb.closest(".toggle");
+  host.classList.toggle("on",cb.checked);
+  host.classList.toggle("off",!cb.checked);
+}
+
+function buildFields(prefix, key, val, parent, pathBase){
+  if(typeof val==="object"&&val!==null&&!Array.isArray(val)){
+    const sub=document.createElement("div");
+    sub.style.margin="4px 0 4px 14px";
+    for(const k of Object.keys(val)){
+      const v=val[k];
+      if(v&&typeof v==="object"&&!Array.isArray(v)){
+        // 字典组：保留一个组标题；标量参数的名称由字段自身承担，不重复堆标题
+        const lbl=document.createElement("div");
+        lbl.className="check";
+        lbl.style.padding="1px 0";
+        lbl.textContent=k;
+        lbl.style.fontWeight="600";
+        sub.appendChild(lbl);
+      }
+      buildFields(prefix+"."+k, k, v, sub, pathBase+(pathBase?"."+k:""+k));
+    }
+    parent.appendChild(sub);
+    return;
+  }
+  if(Array.isArray(val)){
+    // 列表参数（如 universe.allowed_prefixes）：单输入框逗号分隔，
+    // 避免同名标签重复渲染和 [i] 路径写入坏键
+    parent.appendChild(buildArrayInput(pathBase, key, val));
+    return;
+  }
+  parent.appendChild(buildInput(pathBase, key, val));
+}
+
+function buildArrayInput(path, label, arr){
+  const wrap=document.createElement("div"); wrap.className="field";
+  const lbl=document.createElement("label");
+  lbl.textContent=label;
+  lbl.title=label;
+  wrap.appendChild(lbl);
+  const inp=document.createElement("input");
+  inp.type="text"; inp.value=arr.map(String).join(", ");
+  inp.dataset.path=path;
+  inp.addEventListener("change",()=>{
+    const parts=inp.value.split(/[,，;\s]+/).map(s=>s.trim()).filter(Boolean);
+    setPath(initial,path,parts); changed.add(path);
+  });
+  wrap.appendChild(inp);
+  return wrap;
+}
+
+function buildInput(path, label, val){
+  const wrap=document.createElement("div"); wrap.className="field";
+  const lbl=document.createElement("label");
+  lbl.textContent=label;
+  lbl.title=label;
+  wrap.appendChild(lbl);
+  if(typeof val==="boolean"){
+    const cb=document.createElement("input");
+    cb.type="checkbox"; cb.checked=val;
+    cb.dataset.path=path;
+    cb.addEventListener("change",e=>{
+      setPath(initial, path, e.target.checked);
+      changed.add(path);
+    });
+    wrap.appendChild(cb);
+  }else if(typeof val==="number"){
+    const inp=document.createElement("input");
+    inp.type="number"; inp.step="any"; inp.value=val;
+    inp.dataset.path=path;
+    inp.addEventListener("input",()=>{ if(inp.value!=="") setPath(initial,path,Number(inp.value)); changed.add(path); });
+    wrap.appendChild(inp);
+  }else{
+    const inp=document.createElement("input");
+    inp.type="text"; inp.value=val===null?"":String(val);
+    inp.dataset.path=path;
+    inp.addEventListener("change",()=>{ if(inp.value!==val){ setPath(initial,path,inp.value); changed.add(path); } });
+    wrap.appendChild(inp);
+  }
+  return wrap;
+}
+
+function refreshDisables(){
+  document.querySelectorAll(".gbody[data-disabled-for]").forEach(b=>{
+    const sec=b.getAttribute("data-disabled-for");
+    const on=!sectionDisabled(sec);
+    b.querySelectorAll("input[type=number],input[type=text],input[type=checkbox]").forEach(el=>{
+      if(el.dataset.path && !el.dataset.path.startsWith("paths.")) el.disabled=!on;
+    });
+  });
+  document.querySelectorAll("#config-root .group").forEach(g=>{
+    const key=g.querySelector(".ghead").textContent.trim().split(/\s/).slice(1)[0].trim().replace(/[^\w]/g,"");
+    // 简单回退：遍历 section 对 SECTION_PARENT 匹配
+  });
+  document.querySelectorAll("#config-root .group").forEach(sec=>{
+    const head=sec.querySelector(".ghead").innerText;
+    let name=null;
+    for(const k of Object.keys(SECTION_PARENT)) if(head.includes(k)||head.includes(SECTION_META[k])) name=k;
+    const wrapOff = name&& SECTION_PARENT[name].some(d=>getPath(initial,d)===false);
+    sec.classList.toggle("off",!!wrapOff);
+  });
+}
+function refreshModulesNote(){}
+
+/* ---------------- 前端侧 collected ---------------- */
+function collectPatch(){
+  const patch={};
+  for(const p of changed) setPath(patch,p,getPath(initial,p));
+  return patch;
+}
+function resetForm(){
+  if(!initial) return;
+  changed.clear();
+  const mod=getPath(initial,"modules")||{};
+  // 重新渲染全部
+  renderAll();
+}
+
+/* ---------------- 后端调用 ---------------- */
+async function fetchJSON(url, opts){
+  const r=await fetch(url,opts);
+  if(!r.ok){ const t=await r.text(); throw new Error(t.slice(0,200)); }
+  return r.json();
+}
+async function apiRun(){
+  const msg=$("#run-msg");
+  const name=$("#name").value.trim();
+  if(!name) name="回测"+Math.random().toString(36).slice(2,6);
+  try{
+    const {run_id}=await fetchJSON("/api/run",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({name, patch:collectPatch()})});
+    msg.innerHTML=`已启动 <code>${run_id}</code>，信号生成+回测约需 1~3 分钟，请稍候…`;
+    pollRun(run_id); loadRuns();
+  }catch(e){ msg.innerHTML=`<span style="color:var(--bad)">启动失败：${e.message}</span>`; }
+}
+
+async function pollRun(id){
+  const st=$("#run-state");
+  const timer=setInterval(async()=>{
+    try{
+      const r=await fetchJSON(`/api/run/${id}/status`);
+      if(r.status==="done"){
+        clearInterval(timer);
+        if(st){st.textContent="完成";st.className="state done";}
+        renderResult(r); loadRuns();
+        msg("完成，见下方结果");
+      }else if(r.status==="error"){
+        clearInterval(timer);
+        if(st){st.textContent="失败："+r.message;st.className="state err";}
+        msg("失败："+ (r.message||"").slice(0,120));
+      }else{
+        if(st){st.textContent=r.message;st.className="state run";}
+      }
+    }catch(e){/* ignore */}
+  },2500);
+}
+function msg(t){$("#run-msg").textContent=t;}
+
+function renderResult(r){
+  const s=r.summary||{};
+  const fR=s.total_return_pct||0;
+  const bR=s.benchmark?(s.benchmark.return_pct||0):null;
+  const kpi=document.createElement("div"); kpi.className="kpis";
+  kpi.innerHTML=`
+    <div class="kpi"><div class="k">综合收益</div><div class="v ${fR>=0?"up":"dn"}">${fR>=0?"+":""}${fR.toFixed(2)}%</div></div>
+    ${bR!==null?`<div class="kpi"><div class="k">沪深300基准</div><div class="v ${bR>=0?"up":"dn"}">${bR>=0?"+":""}${bR.toFixed(2)}%</div></div>`:""}
+    <div class="kpi"><div class="k">最大回撤</div><div class="v dn">${(s.max_drawdown_pct||0).toFixed(2)}%</div></div>
+    <div class="kpi"><div class="k">交易笔数</div><div class="v">${s.trades??0}</div></div>
+    <div class="kpi"><div class="k">信号数</div><div class="v">${s.signal_count??0}</div></div>
+    <div class="kpi"><div class="k">胜率(卖出)</div><div class="v">${s.win_rate_pct??0}%</div></div>
+    <div class="kpi"><div class="k">日期数</div><div class="v">${s.backtest_dates??0}</div></div>`;
+  const tbl=document.createElement("table");
+  tbl.className="navtable";
+  tbl.innerHTML="<tr><th>账户</th><th>净值</th><th>收益</th><th>交易</th></tr>"+
+    Object.values(s.accounts||{}).map(a=>`<tr><td>${a.label}</td>
+      <td>${a.nav.toFixed(4)}</td>
+      <td class="${a.return_pct>=0?"c up":"c dn"}">${a.return_pct>=0?"+":""}${a.return_pct.toFixed(2)}%</td>
+      <td>${a.trades}</td></tr>`).join("");
+  const wrap=$("#summary");
+  wrap.innerHTML=""; wrap.appendChild(kpi); wrap.appendChild(tbl);
+  drawChart($("#chart"), r.navs?.accounts||{}, true, r.navs?.benchmark||[]);
+}
+
+/* ---------------- 绘制折线图 ---------------- */
+const COLORS=["#38bdf8","#f472b6","#a3e635","#fbbf24","#fb7185","#2dd4bf","#c084fc","#f97316"];
+function drawChart(svg, accounts, meanOnly, benchmark){
+  svg.innerHTML="";
+  const NS="http://www.w3.org/2000/svg";
+  const W=svg.clientWidth||600, H=300;
+  svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
+  svg.setAttribute("preserveAspectRatio","none");
+  const series=Object.entries(accounts).map(([k,a])=>({name:k,label:ACCOUNT_LABEL[k]||k,values:a.map(x=>({d:x.date,v:x.nav}))}));
+  if(meanOnly&&series.length>1){
+    // 综合净值 = 跨账户平均
+    const by=new Map();
+    series.forEach(s=>s.values.forEach(x=>by.set(x.d,[...(by.get(x.d)||[]),x.v])));
+    series.splice(0,series.length,{name:"avg",label:"综合净值",values:[...by].sort((a,b)=>a[0].localeCompare(b[0])).map(([d,v])=>({d,v:v.reduce((s,x)=>s+x,0)/v.length}))});
+  }
+  // 基准：沪深300 起始归一为 1，以区分色虚线叠加
+  if(benchmark&&benchmark.length){
+    series.push({name:"bench",label:"沪深300",values:benchmark.map(x=>({d:x.date,v:x.nav}))});
+  }
+  if(!series.length||!series[0].values.length){
+    const t=document.createElementNS(NS,"text");
+    t.setAttribute("x",W/2);t.setAttribute("y",H/2);t.setAttribute("fill","#8fa0bd");
+    t.textContent="暂无净值数据（可能净值追踪被关闭）";
+    svg.appendChild(t); return;
+  }
+  const all=series.flatMap(s=>s.values.map(x=>x.v));
+  const xs=series[0].values.map(x=>x.d);
+  const xmin=xs[0], xmax=xs[xs.length-1];
+  let ymin=Math.min(...all), ymax=Math.max(...all);
+  const pad=Math.max((ymax-ymin)*0.08,1e-4); ymin-=pad; ymax+=pad;
+  const PAD={l:44, r:14, t:14, b:34};
+  const x=d=>PAD.l+(new Date(d)-new Date(xmin))/(new Date(xmax))*(W-PAD.l-PAD.r);
+  const y=v=>PAD.t+H-PAD.b-(v-ymin)/(ymax-ymin)*(H-PAD.t-PAD.b);
+  // 网格
+  for(let g=0; g<=4; g++){
+    const val=ymin+(ymax-ymin)*g/4;
+    const yy=y(val);
+    svg.insertAdjacentHTML("beforeend",
+      `<line class="grid" x1="${PAD.l}" y1="${yy}" x2="${W-PAD.r}" y2="${yy}"/>
+       <text class="lab" x="${PAD.l-6}" y="${yy+3}" text-anchor="end">${val.toFixed(4)}</text>`);
+  }
+  for(let g=0; g<=3; g++){
+    const dd=xmin+(xmax-xmin)*g/3;
+    svg.insertAdjacentHTML("beforeend",
+      `<line class="axis" x1="${x(dd)}" y1="${H-PAD.b}" x2="${x(dd)}" y2="${PAD.t}" opacity=".3"/>
+       <text class="lab" x="${x(dd)}" y="${H-PAD.b+16}" text-anchor="middle">${dd.slice(5)}</text>`);
+  }
+  if((ymin<0)||(ymax>1)) svg.insertAdjacentHTML("beforeend",`<line class="zero" x1="${PAD.l}" y1="${y(1)}" x2="${W-PAD.r}" y2="${y(1)}" opacity=".3"/>`);
+  // 先画基准（虚线），再画策略线覆盖在上
+  const benchSeries=series.filter(s=>s.name==="bench");
+  const stratSeries=series.filter(s=>s.name!=="bench");
+  const drawSeries=(list, dash)=>list.forEach((s,i)=>{
+    const color=s.name==="bench"?"#8e9db8":COLORS[i%COLORS.length];
+    const pts=s.values.map(v=>`${x(v.d)},${y(v.v)}`).join(" ");
+    svg.insertAdjacentHTML("beforeend",`<polyline fill="none" stroke="${color}" stroke-width="2" ${dash}points="${pts}"/>`);
+  });
+  drawSeries(benchSeries,"stroke-dasharray=\"5 4\" ");
+  drawSeries(stratSeries,"");
+  // 图例
+  series.forEach((s,i)=>{
+    const color=s.name==="bench"?"#8e9db8":COLORS[stratSeries.indexOf(s)%COLORS.length];
+    svg.insertAdjacentHTML("beforeend",
+      `<text class="lab" x="${PAD.l+6+i*80}" y="${PAD.t+10}" fill="${color}">${s.label}${s.name==="bench"?"(基准)":""}</text>`);
+  });
+}
+const ACCOUNT_LABEL={pullback:"A1 缩量回踩",breakout:"A2 平台突破",oversold:"A3 超跌反弹",momentum:"A4 强者恒强"};
+
+/* ---------------- 记录列表与叠加 ---------------- */
+async function loadRuns(){
+  const lst=$("#runlist");
+  const {runs}=await fetchJSON("/api/runlist");
+  $("#hist-n").textContent=runs.length;
+  const done=runs.filter(r=>r.status==="done");
+  lst.innerHTML="";
+  if(!runs.length){
+    lst.innerHTML='<p style="color:var(--mut);margin:0">暂无回测记录</p>'; return;
+  }
+  for(const r of runs){
+    const label=document.createElement("label");
+    const cl=r.status==="done"?"up":r.status==="error"?"dn":"";
+    label.innerHTML=`<input type="checkbox" data-rid="${r.id}">
+      <span>${r.name} · ${r.created.slice(5,16)}${r.finished?" → "+r.finished.slice(5,16):""}
+      · <b class="${cl}">${r.status==="done"?(r.summary.total_return_pct>=0?"+":"")+r.summary.total_return_pct+"%":""}</b></span>`;
+    lst.appendChild(label);
+  }
+  if(done.length&&!overlayState.active) prefillLast(done[0]);
+}
+let overlayState={active:false,items:new Set(),series:null};
+function prefillLast(r){
+  // 默认画最后一个已完成 run（含基准叠加）
+  drawChart($("#chart"), r.navs?.accounts||{}, true, r.navs?.benchmark||[]);
+}
+async function doOverlay(){
+  const ids=[...document.querySelectorAll("#runlist input:checked")].map(el=>el.dataset.rid);
+  if(!ids.length){$("#overlay-msg").textContent="请先勾选回测记录";return;}
+  const {dates,series}=await fetchJSON("/api/compare?ids="+ids.join(","));
+
+  // 聚合：每个 run 4 条账户曲线 → 1 条综合曲线
+  // 1) 每个日期位置跨账户求平均净值
+  // 2) 以本 run 首个有效净值为基准，归一化为收益率(%)，不同起始日也可对比
+  const runs=[];
+  for(const s of series||[]){
+    const row=runs.find(r=>r.run_id===s.run_id);
+    if(row){row.vals.push(s);}else{
+      row={run_id:s.run_id, run_name:s.run_name, vals:[s], values:null, hide:false, summarize:s.summarize};
+      runs.push(row);
+    }
+  }
+  const agg=runs.map((r,i)=>{
+    // 聚合跨账户的净值序列
+    const raw=dates.map(()=>null);
+    raw.length=dates.length;
+    for(const s of r.vals){
+      s.values.forEach((v,idx)=>{ if(v===null||idx>=raw.length)return;
+        raw[idx]=(raw[idx]==null)?v:raw[idx]+v; });
+    }
+    const mv=raw.map((v,idx)=>{
+      let c=0; for(const s of r.vals) if(s.values[idx]!=null)c++;
+      return c>0? v/c : null;
+    });
+    // 归一化为收益率%(以首个有效净值为基准 0%)
+    let first=null, last=null;
+    mv.forEach(v=>{if(v!=null){if(first===null)first=v;last=v;}});
+    return {
+      run_id:r.run_id, name:r.run_name+" · 综合", hide:false,
+      color:COLORS[i%COLORS.length],
+      values:mv.map(v=>v==null?null:(v-first)/first*100),
+      final_ret: first===null?NaN:((last-first)/first*100)
+    };
+  });
+
+  overlayState.active=true;
+  overlayState.series=agg;
+  $("#overlay").style.display="block";
+  $("#overlay-msg").textContent=`叠加 ${ids.length} 条记录（每 run 取跨账户平均净值，归一化收益率%）…`;
+  drawOverlayChart($("#overlay"), dates, agg, true);
+}
+
+function drawOverlayChart(svg, dates, series){
+  const NS="http://www.w3.org/2000/svg";
+  svg.innerHTML="";
+  const W=svg.clientWidth||900, H=320;
+  svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
+  svg.setAttribute("preserveAspectRatio","none");
+  const visible=series.filter(s=>!s.hide);
+  const allVals=visible.flatMap(s=>s.values.filter(v=>v!=null));
+  if(!dates.length||!allVals.length){
+    svg.insertAdjacentHTML("beforeend",`<text x="${W/2}" y="${H/2}" fill="#8fa0bd" text-anchor="middle">暂无可叠加数据</text>`);
+    return;
+  }
+  // 序列已是归一化收益率(%)，0 为基准线
+  let ymin=Math.min(...allVals), ymax=Math.max(...allVals);
+  if(ymin>0)ymin=-0.05; if(ymax<0)ymax=0.05;
+  const pad=(ymax-ymin)*0.1||0.2; ymin-=pad; ymax+=pad;
+  const PAD={l:55, r:16, t:26, b:34};
+  const x=idx=>PAD.l+idx/(dates.length-1)*(W-PAD.l-PAD.r);
+  const y=v=>PAD.t+H-PAD.b-(v-ymin)/(ymax-ymin)*(H-PAD.t-PAD.b);
+  // 网格 + 轴（百分比）
+  for(let g=0;g<=4;g++){
+    const val=ymin+(ymax-ymin)*g/4; const yy=y(val);
+    svg.insertAdjacentHTML("beforeend",
+      `<line class="grid" x1="${PAD.l}" y1="${yy}" x2="${W-PAD.r}" y2="${yy}"/>
+       <text class="lab" x="${PAD.l-6}" y="${yy+3}" text-anchor="end">${val.toFixed(2)}%</text>`);
+  }
+  const xstep=Math.max(1,Math.floor(dates.length/6));
+  for(let i=xstep;i<dates.length-1;i+=xstep){
+    svg.insertAdjacentHTML("beforeend",`<text class="lab" x="${x(i)}" y="${H-PAD.b+16}" text-anchor="middle">${dates[i].slice(5)}</text>`);
+  }
+  // 0% 基准线
+  if(ymin<0&&ymax>0) svg.insertAdjacentHTML("beforeend",`<line class="zero" x1="${PAD.l}" y1="${y(0)}" x2="${W-PAD.r}" y2="${y(0)}" opacity=".6"/>`);
+  // 曲线
+  series.forEach((s,i)=>{
+    if(s.hide) return;
+    const pts=[];
+    s.values.forEach((v,idx)=>{ if(v!=null) pts.push(`${x(idx)},${y(v)}`); });
+    if(pts.length) svg.insertAdjacentHTML("beforeend",'<polyline fill="none" stroke="'+s.color+'" stroke-width="1.8" points="'+pts.join(" ")+'"/>');
+  });
+  // 图例
+  const lg=$("#overlay-legend");
+  lg.innerHTML="";
+  series.forEach((s,i)=>{
+    const lgitem=document.createElement("div");
+    lgitem.className="lg";
+    lgitem.dataset.i=i;
+    const fr=s.final_ret;
+    const retTxt=Number.isNaN(fr)?"":" ("+(fr>=0?"+":"")+fr.toFixed(2)+"%)";
+    const retCls=(!Number.isNaN(fr)&&fr>=0)?"c up":"c dn";
+    lgitem.innerHTML=`<span class="sw" style="background:${s.color}"></span>${s.name}<span class="${retCls}">${retTxt}</span>`;
+    if(s.hide) lgitem.classList.add("hide");
+    lgitem.addEventListener("click",()=>{
+      s.hide=!s.hide;
+      drawOverlayChart($("#overlay"),dates,series);
+    });
+    lg.appendChild(lgitem);
+  });
+}
+
+/* ---------------- 保存 ---------------- */
+async function saveConfig(){
+  try{
+    const {saved}=await fetchJSON("/api/save",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({patch:collectPatch()})});
+    $("#run-msg").textContent="已保存到 config.yaml";
+    if(saved) await reloadConfig();
+  }catch(e){
+    $("#run-msg").textContent="保存失败："+e.message;
+  }
+}
+async function reloadConfig(){
+  const {config}=await fetchJSON("/api/config");
+  initial=JSON.parse(JSON.stringify(config));
+  renderAll();
+}
+async function loadSystem(){
+  try{
+    const s=await fetchJSON("/api/system");
+    $("#data-info").textContent=`数据 ${s.daily_files} 只 · 信号缓存 ${s.signal_cache?"已":"无"} · 在线 ${s.uptime_min}min`;
+    $("#upt").textContent=s.uptime_min+"min";
+    setTimeout(loadSystem,60000);
+  }catch(e){}
+}
+
+/* ---------------- 初始化 ---------------- */
+(async function init(){
+  $("#btn-run").addEventListener("click",apiRun);
+  $("#btn-save").addEventListener("click",saveConfig);
+  $("#btn-reset").addEventListener("click",resetForm);
+  $("#btn-overlay").addEventListener("click",doOverlay);
+  $("#btn-clear").addEventListener("click",()=>{
+    overlayState.active=false;
+    $("#overlay").style.display="none";
+    $("#overlay-legend").innerHTML="";
+    $("#overlay-msg").textContent="已清除叠加";
+  });
+  try{
+    await reloadConfig();
+    await loadRuns();
+    await loadSystem();
+    setInterval(loadRuns,15000);
+  }catch(e){
+    $("#run-msg").textContent="初始化失败："+e.message;
+  }
+})();
+</script>
+</body>
+</html>

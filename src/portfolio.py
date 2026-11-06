@@ -166,7 +166,7 @@ class Portfolio:
                 p.hold_days = self._hold_days(p.buy_date, date)
         if not self.nav_tracking:
             return
-        self.daily_nav.append({
+        rec = {
             "date": date,
             "account": self.account_id,
             "cash": round(self.broker_cash, 2),
@@ -174,7 +174,13 @@ class Portfolio:
             "total": round(self.total_value(prices), 2),
             "nav": round(self.total_value(prices) / max(self.initial_cash, 1e-9), 6),
             "holdings": len(self.holdings),
-        })
+        }
+        # 同日重复调用（如策略 stop() 强制清仓后再 mark_nav）覆盖当日最后记录，
+        # 避免同日产生两条净值（前一条持仓市值、后一条清仓现金）
+        if self.daily_nav and self.daily_nav[-1]["date"] == rec["date"]:
+            self.daily_nav[-1] = rec
+        else:
+            self.daily_nav.append(rec)
 
     def reset_daily_counters(self):
         """每日重置计数器（由调度层调用）"""

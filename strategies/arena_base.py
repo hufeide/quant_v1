@@ -9,7 +9,7 @@
 import backtrader as bt
 from typing import Dict, List
 from src.portfolio import Portfolio
-from src.broker.simulated import SimulatedBroker
+from src.broker.simulated import SimulatedBroker, Fill
 from src.risk.rules import RiskManager
 from src.risk.sentiment_gate import SentimentGate
 from src.config import load_config, get_config, module_enabled
@@ -49,7 +49,7 @@ class ArenaStrategyBase(bt.Strategy):
                 "portfolio_enabled": module_enabled("portfolio.enabled"),
                 "holdings_limit": module_enabled("portfolio.holdings_limit"),
                 "cooldown_enabled": module_enabled("portfolio.cooldown"),
-                "nav_tracking": module_enabled("portfolio.nav_tracking"),
+                "nav_tracking": True,   # 净值追踪默认打开，不再受模块开关影响
                 "score_filter": module_enabled("scoring.enabled"),
             }
         )
@@ -92,6 +92,21 @@ class ArenaStrategyBase(bt.Strategy):
     def detect_pattern(self, data: bt.Data, dt: int) -> bool:
         """子类实现：检测形态，返回 bool"""
         return False
+
+    def prenext(self):
+        """指标预热期（SMA 等指标未就绪、next() 尚未被调用）补记净值
+
+        backtrader 在指标 minperiod 达成前只调用 prenext 而不会调用 next，
+        此前净值曲线缺失行情首日后的 minperiod-1 个交易日（约 19 天）。
+        本保单只做净值时间序列，不动买卖与当日计数器（_on_date_change
+        仍由 next() 在真正开始交易时统一处理）。
+        """
+        new_date = self.datas[0].datetime.date(0).isoformat()
+        if new_date == self.current_date:
+            return
+        prices = {name: d.close[0] for name, d in self.data_map.items() if len(d)}
+        self.portfolio.mark_nav(new_date, prices)
+        self.current_date = new_date
 
     def next(self):
         """主循环：先卖后买"""
@@ -273,8 +288,44 @@ class ArenaStrategyBase(bt.Strategy):
         db = _d.fromisoformat(current_date[:10])
         return (db - da).days
 
+    def _force_close(self, pf=None, reason="回测结束强制卖出"):
+        """回测最后一天：按当日收盘价强制卖出全部剩余持仓
+
+        撮合层在跌停封死时拒绝成交，但收口清仓是统一结算动作，
+        broker 拒单时直接构造 Fill（费用照常计）强制平仓，
+        保证每个账户最后都不留持仓。
+        清仓后立即用现金口径重记当日净值，最终净值即现金口径。
+        """
+        pf = pf if pf is not None else self.portfolio
+        if not pf.holdings:
+            return
+        date = self.current_date or (pf.daily_nav[-1]["date"] if pf.daily_nav else "")
+        for code, pos in list(pf.holdings.items()):
+            if code in self.data_map:
+                data = self.data_map[code]
+                price = data.close[0]
+                pre_close = data.close[-1] if len(data) > 1 else price
+            else:  # 无行情数据的持仓：按最新成本价估算清算价
+                price = pos.current_price or pos.init_price
+                pre_close = price
+            limit_down = pre_close * (1.0 - self.broker_sim.limit_pct(code))
+            fill = self.broker_sim.sell(
+                code, price, pos.qty,
+                pre_close=pre_close,
+                limit_down=limit_down,
+                ts=date,
+            )
+            if fill is None:
+                fees = self.broker_sim.calc_fees(price, pos.qty, "sell")
+                fill = Fill(code, "sell", price, pos.qty, fees["commission"],
+                            fees["stamp_tax"], fees["transfer_fee"],
+                            fees["total"], date)
+            pf.record_sell(fill, date, reason)
+        pf.mark_nav(date, {})
+
     def stop(self):
-        """策略结束：输出统计"""
+        """策略结束：最后一天强制清仓 + 输出统计"""
+        self._force_close(self.portfolio)
         total_trades = len(self.portfolio.trades)
         buys = len([t for t in self.portfolio.trades if t["side"] == "buy"])
         sells = len([t for t in self.portfolio.trades if t["side"] == "sell"])

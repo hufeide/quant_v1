@@ -58,7 +58,7 @@ class ArenaDispatcher(ArenaStrategyBase):
                 "portfolio_enabled": module_enabled("portfolio.enabled"),
                 "holdings_limit": module_enabled("portfolio.holdings_limit"),
                 "cooldown_enabled": module_enabled("portfolio.cooldown"),
-                "nav_tracking": module_enabled("portfolio.nav_tracking"),
+                "nav_tracking": True,   # 净值追踪默认打开，不再受模块开关影响
                 "score_filter": module_enabled("scoring.enabled"),
             }
         )
@@ -81,6 +81,7 @@ class ArenaDispatcher(ArenaStrategyBase):
 
     def stop(self):
         for name, pf in self.accounts.items():
+            self._force_close(pf)
             final = pf.daily_nav[-1]["nav"] if pf.daily_nav else 1.0
             print(f"[{name}] 最终净值 {final:.4f} ({(final-1)*100:+.2f}%) "
                   f"交易 {len(pf.trades)} 笔")
