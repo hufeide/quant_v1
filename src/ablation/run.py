@@ -157,8 +157,8 @@ def run_once(cfg: dict, exp_name: str, skip_signals: bool = False) -> AblationRe
     skip_signals=True（开关不影响候选池/检测器/评分器时）：
     直接复用基线信号，跳过信号生成，省下大量耗时。
     """
-    from src.signal_engine import generate_signals
-    from bt_engine.cerebro import load_sentiment, load_signals, run_arena
+    from src.signals.signal_engine import generate_signals
+    from src.backtest.engine import load_sentiment, load_signals, run_arena
     from src.data_loader import list_codes, load_daily
 
     result = AblationResult(name=exp_name, description="", module="", toggled={})

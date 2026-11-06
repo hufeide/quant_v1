@@ -19,7 +19,8 @@ def load_daily_with_indicators(code: str, daily_dir: str = "data/daily") -> pd.D
     """加载并计算指标"""
     from src.indicators import add_indicators
     df = load_daily(code, daily_dir)
-    if "ma20" not in df.columns:
+    # 以 atr14 为准判断指标是否完整（新增指标后老缓存只缺 atr14）
+    if "atr14" not in df.columns:
         df = add_indicators(df)
     return df
 

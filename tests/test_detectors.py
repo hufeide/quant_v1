@@ -9,11 +9,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
 import pandas as pd
 from src.indicators import add_indicators
-from src.detectors.pullback import PullbackDetector
-from src.detectors.breakout import BreakoutDetector
-from src.detectors.oversold import OversoldDetector
-from src.detectors.momentum import MomentumDetector
-from src.scoring.weighted_scorer import WeightedScorer
+from src.signals.detectors.pullback import PullbackDetector
+from src.signals.detectors.breakout import BreakoutDetector
+from src.signals.detectors.oversold import OversoldDetector
+from src.signals.detectors.momentum import MomentumDetector
+from src.signals.scoring.weighted_scorer import WeightedScorer
 
 PASS = 0
 FAIL = 0

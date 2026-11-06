@@ -6,10 +6,10 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.risk.rules import RiskManager, Position
-from src.risk.sentiment_gate import SentimentGate
-from src.broker.simulated import SimulatedBroker
-from src.portfolio import Portfolio, CooldownTracker
+from src.portfolio.risk_manager import RiskManager, Position
+from src.portfolio.sentiment_gate import SentimentGate
+from src.backtest.broker import SimulatedBroker
+from src.portfolio.portfolio_manager import Portfolio, CooldownTracker
 
 
 PASS = 0
@@ -173,7 +173,7 @@ check("池落后停买(F3)", not ok and "落后" in reason, reason)
 # 现金账簿一致性
 pf2 = Portfolio("A1", 1_000_000, {"cooldown_days": 30, "buy_max_score": 70.0,
                                   "max_buy_per_day": 3, "max_holdings": 6})
-from src.broker.simulated import Fill
+from src.backtest.broker import Fill
 buy_fill = Fill("600000", "buy", 10.0, 10000, 25.0, 0.0, 1.0, 26.0, "2025-09-01")
 pf2.record_buy(buy_fill, "2025-09-01", 60.0)
 check("买入扣现金", abs(pf2.broker_cash - (1_000_000 - 100000 - 26.0)) < 0.01,
@@ -256,7 +256,7 @@ pf_nav.mark_nav("2025-09-01", {})
 check("关闭净值追踪：无 daily_nav", pf_nav.daily_nav == [])
 
 # ---------- 检测器开关 ----------
-from src.signal_engine import build_detectors
+from src.signals.signal_engine import build_detectors
 from src.config import load_config
 cfg = load_config()
 dets_all = build_detectors(cfg)

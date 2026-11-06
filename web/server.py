@@ -109,8 +109,8 @@ def run_job(run_id: str, patch: dict) -> None:
         patch.setdefault("paths", {})["signals"] = str(sig_dir)
 
         from src.data_loader import list_codes, load_daily
-        from src.signal_engine import generate_signals
-        from bt_engine.cerebro import load_sentiment, run_arena
+        from src.signals.signal_engine import generate_signals
+        from src.backtest.engine import load_sentiment, run_arena
 
         with _LOCK:
             clear_override()

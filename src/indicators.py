@@ -43,6 +43,23 @@ def min_low(df: pd.DataFrame, n: int, col: str = "low") -> pd.Series:
     return df[col].rolling(window=n, min_periods=n).min().shift(1)
 
 
+def atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    """平均真实波幅（ATR），Wilder 平滑。
+
+    True Range = max(high-low, |high-prev_close|, |low-prev_close|)
+    ATR 是 position_sizer 计算止损距离与风险预算的唯一依据。
+    prev_close 优先取数据列，缺失时回退 close.shift(1)。
+    """
+    prev_close = (df["pre_close"] if "pre_close" in df.columns
+                  else df["close"].shift(1))
+    tr = pd.concat([
+        df["high"] - df["low"],
+        (df["high"] - prev_close).abs(),
+        (df["low"] - prev_close).abs(),
+    ], axis=1).max(axis=1)
+    return tr.ewm(alpha=1.0 / period, adjust=False, min_periods=period).mean()
+
+
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """为日线 DataFrame 批量添加全部衍生指标
 
@@ -83,6 +100,9 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     # 成交额 10 日均额，用于情绪代理
     out["amount_ma10"] = sma(out["amount"], 10)
     out["amount_ratio"] = out["amount"] / out["amount_ma10"]
+
+    # ATR（Wilder，14 日）——position_sizer 计算止损距离的唯一依据
+    out["atr14"] = atr(out, 14)
 
     return out
 

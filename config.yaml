@@ -103,6 +103,17 @@ position:
   max_buy_per_day: 3
   build_days: 10
   build_start_time: 09:40
+# ATR 风险预算仓位法（portfolio/position_sizer.py）
+# 目标股数 = 总资金 × risk_pct / (ATR × atr_multiple)，向下取整到整手
+# 再用 max_position_pct × 资金 / 价格 封顶。
+sizing:
+  method: atr            # atr（风险预算法）| weight（旧权重法，兼容）
+  risk_pct: 0.005        # 每笔交易风险预算占比（0.5% = 千五）
+  atr_multiple: 2.0      # 止损距离 = ATR × 倍数
+  max_position_pct: 0.18 # 单股最大仓位占比（封顶，默认与旧 target_weight 一致）
+  lot_size: 100          # 整手单位
+  total_risk_pct: 0.02   # 组合总风险预算占比（risk_manager 总风控阈值）
+  industry_max: 2        # 行业敞口上限（research_sandbox/topics/股票_20251105.md：3 只 AI 加 1 只机器人，max≥4 才可能合规）
 risk:
   stop_loss: -6.0
   breakeven_trigger: 7.0
